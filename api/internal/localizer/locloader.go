@@ -41,6 +41,8 @@ type Loader struct {
 
 var _ ifc.Loader = &Loader{}
 
+var loaders map[string]*Loader
+
 // NewLoader is the factory method for Loader, under localize constraints, at rawTarget. For invalid localize arguments,
 // NewLoader returns an error.
 func NewLoader(rawTarget string, rawScope string, rawNewDir string, fSys filesys.FileSystem) (*Loader, Args, error) {
@@ -106,6 +108,13 @@ func (ll *Loader) Load(path string) ([]byte, error) {
 // New returns a Loader at path if path is a valid localize root.
 // Otherwise, New returns an error.
 func (ll *Loader) New(path string) (ifc.Loader, error) {
+	if loaders == nil {
+		loaders = make(map[string]*Loader)
+	}
+	if loaders[path] != nil {
+		return loaders[path], nil
+	}
+
 	ldr, err := ll.Loader.New(path)
 	if err != nil {
 		return nil, errors.WrapPrefixf(err, "invalid root reference")
@@ -123,10 +132,17 @@ func (ll *Loader) New(path string) (ifc.Loader, error) {
 		return nil, errors.Errorf("localize remote root %q missing ref query string parameter", path)
 	}
 
-	return &Loader{
+	l := &Loader{
 		fSys:   ll.fSys,
 		args:   ll.args,
 		Loader: ldr,
 		local:  ll.local && ldr.Repo() == "",
-	}, nil
+	}
+
+	// Only memoize repo remote paths
+	if ldr.Repo() != "" && hasRef(path) {
+		loaders[path] = l
+	}
+
+	return l, nil
 }

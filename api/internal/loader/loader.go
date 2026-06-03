@@ -26,10 +26,23 @@ func NewLoader(
 		return newLoaderAtGitClone(
 			repoSpec, fSys, nil, git.ClonerUsingGitExec)
 	}
+	wsCleanup := func() error { return nil }
+	if wsTarget, cleanup, ok := tryPrepareFastWorkspace(target); ok {
+		target = wsTarget
+		wsCleanup = cleanup
+	}
 	root, err := filesys.ConfirmDir(fSys, target)
 	if err != nil {
 		return nil, errors.WrapPrefixf(err, "%s", ErrRtNotDir.Error())
 	}
-	return newLoaderAtConfirmedDir(
-		lr, root, fSys, nil, git.ClonerUsingGitExec), nil
+	ldr := newLoaderAtConfirmedDir(
+		lr, root, fSys, nil, git.ClonerUsingGitExec)
+	prevCleaner := ldr.cleaner
+	ldr.cleaner = func() error {
+		if err := wsCleanup(); err != nil {
+			return err
+		}
+		return prevCleaner()
+	}
+	return ldr, nil
 }

@@ -4,16 +4,47 @@
 package git
 
 import (
+	"fmt"
+	"sync"
+
 	"sigs.k8s.io/kustomize/kyaml/filesys"
 )
 
 // Cloner is a function that can clone a git repo.
 type Cloner func(repoSpec *RepoSpec) error
 
+var (
+	clones     = make(map[string]filesys.ConfirmedDir)
+	cloneMutex sync.Mutex
+)
+
+// cloneCacheKey identifies a repo checkout; kustomize subpaths share one clone per ref.
+func cloneCacheKey(repoSpec *RepoSpec) string {
+	ref := repoSpec.Ref
+	if ref == "" {
+		ref = "HEAD"
+	}
+	return fmt.Sprintf("%s\x00%s", repoSpec.CloneSpec(), ref)
+}
+
 // ClonerUsingGitExec uses a local git install, as opposed
 // to say, some remote API, to obtain a local clone of
 // a remote repo.
 func ClonerUsingGitExec(repoSpec *RepoSpec) error {
+	key := cloneCacheKey(repoSpec)
+	if dir, found := clones[key]; found {
+		repoSpec.Dir = dir
+		return nil
+	}
+
+	cloneMutex.Lock()
+	defer cloneMutex.Unlock()
+
+	if dir, found := clones[key]; found {
+		repoSpec.Dir = dir
+		return nil
+	}
+
 	r, err := newCmdRunner(repoSpec.Timeout)
 	if err != nil {
 		return err
@@ -41,6 +72,10 @@ func ClonerUsingGitExec(repoSpec *RepoSpec) error {
 	if repoSpec.Submodules {
 		return r.run("submodule", "update", "--init", "--recursive")
 	}
+
+	// save the location of the clone for later reuse
+	clones[key] = r.dir
+
 	return nil
 }
 

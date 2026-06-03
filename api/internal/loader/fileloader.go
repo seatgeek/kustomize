@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"sigs.k8s.io/kustomize/api/ifc"
 	"sigs.k8s.io/kustomize/api/internal/git"
@@ -154,6 +155,10 @@ func (fl *FileLoader) New(path string) (ifc.Loader, error) {
 		return nil, errors.Errorf("new root cannot be empty")
 	}
 
+	if rel, ok := git.RelPathFromShipItURL(path, fl.Root()); ok {
+		path = rel
+	}
+
 	repoSpec, err := git.NewRepoSpecFromURL(path)
 	if err == nil {
 		// Treat this as git repo clone request.
@@ -187,10 +192,20 @@ func newLoaderAtGitClone(
 	repoSpec *git.RepoSpec, fSys filesys.FileSystem,
 	referrer *FileLoader, cloner git.Cloner) (ifc.Loader, error) {
 	cleaner := repoSpec.Cleaner(fSys)
-	err := cloner(repoSpec)
+	anchor := ""
+	if referrer != nil {
+		anchor = referrer.Root()
+	}
+	bound, err := git.TryLocalShipIt(repoSpec, anchor)
 	if err != nil {
-		cleaner()
 		return nil, err
+	}
+	if !bound {
+		err = cloner(repoSpec)
+		if err != nil {
+			cleaner()
+			return nil, err
+		}
 	}
 	root, f, err := fSys.CleanedAbs(repoSpec.AbsPath())
 	if err != nil {
@@ -311,6 +326,7 @@ func (fl *FileLoader) httpClientGetContent(path string) ([]byte, error) {
 	} else {
 		hc = &http.Client{}
 	}
+	hc.Timeout = 13 * time.Second // arbitrary (but non-infinite) timeout for HTTP requests
 	parsedURL, err := url.ParseRequestURI(path)
 	if err != nil {
 		return nil, errors.Wrap(err)

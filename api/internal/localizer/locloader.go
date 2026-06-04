@@ -124,7 +124,9 @@ func (ll *Loader) New(path string) (ifc.Loader, error) {
 
 	if repo := ldr.Repo(); repo == "" {
 		if ll.local && !filesys.ConfirmedDir(ldr.Root()).HasPrefix(ll.args.Scope) {
-			return nil, errors.Errorf("root %q outside localize scope %q", ldr.Root(), ll.args.Scope)
+			if !git.IsUnderLocalShipItCheckout(filesys.ConfirmedDir(ldr.Root())) {
+				return nil, errors.Errorf("root %q outside localize scope %q", ldr.Root(), ll.args.Scope)
+			}
 		}
 		if ll.local && filesys.ConfirmedDir(ldr.Root()).HasPrefix(ll.args.NewDir) {
 			return nil, errors.Errorf(

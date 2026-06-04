@@ -24,19 +24,51 @@ var (
 	shipItRootOnce     sync.Once
 	shipItRoot         string
 	shipItRootOk       bool
-	shipItURLRegexOnce sync.Once
-	shipItURLRegex     *regexp.Regexp
-	localShipItDisabled bool
+	shipItURLRegexOnce      sync.Once
+	shipItURLRegex          *regexp.Regexp
+	localShipItRelPathDisabled bool
 )
 
-// DisableLocalShipIt skips binding remote ship-it bases to a local checkout (e.g. during localize).
-func DisableLocalShipIt() {
-	localShipItDisabled = true
+// DisableLocalShipItRelPath skips rewriting ship-it git URLs to paths relative to the loader root.
+// Used during localize so roots are copied into localized-files instead of referenced outside scope.
+func DisableLocalShipItRelPath() {
+	localShipItRelPathDisabled = true
 }
 
-// EnableLocalShipIt re-enables local ship-it binding.
-func EnableLocalShipIt() {
-	localShipItDisabled = false
+// EnableLocalShipItRelPath re-enables ship-it URL rewriting.
+func EnableLocalShipItRelPath() {
+	localShipItRelPathDisabled = false
+}
+
+// LocalShipItRoot returns the discovered local platform/ship-it checkout, if any.
+func LocalShipItRoot(anchorDir string) (filesys.ConfirmedDir, bool) {
+	root, ok := DiscoverShipItRoot(anchorDir)
+	if !ok {
+		return "", false
+	}
+	confirmed, err := filesys.ConfirmDir(filesys.MakeFsOnDisk(), root)
+	if err != nil {
+		return "", false
+	}
+	return confirmed, true
+}
+
+// IsUnderLocalShipItCheckout reports whether dir is inside the local ship-it checkout.
+func IsUnderLocalShipItCheckout(dir filesys.ConfirmedDir) bool {
+	shipIt, ok := LocalShipItRoot(dir.String())
+	if !ok {
+		return false
+	}
+	return dir.HasPrefix(shipIt) || dir == shipIt
+}
+
+// IsLocalShipItCheckoutRoot reports whether dir is the root of the local ship-it checkout.
+func IsLocalShipItCheckoutRoot(dir filesys.ConfirmedDir) bool {
+	shipIt, ok := LocalShipItRoot(dir.String())
+	if !ok {
+		return false
+	}
+	return dir == shipIt
 }
 
 func normalizeGitlabHostname(raw string) string {
@@ -46,9 +78,14 @@ func normalizeGitlabHostname(raw string) string {
 	return strings.TrimSuffix(host, "/")
 }
 
+// GitlabHostname returns the GitLab host from GITLAB_HOSTNAME.
+func GitlabHostname() string {
+	return normalizeGitlabHostname(os.Getenv(gitlabHostnameEnvVar))
+}
+
 // gitlabHostname returns the GitLab host from GITLAB_HOSTNAME.
 func gitlabHostname() string {
-	return normalizeGitlabHostname(os.Getenv(gitlabHostnameEnvVar))
+	return GitlabHostname()
 }
 
 func isShipItRepoSpec(rs *RepoSpec) bool {
@@ -150,7 +187,7 @@ func DiscoverShipItRoot(anchorDir string) (string, bool) {
 // RelPathFromShipItURL rewrites a remote ship-it git base to a path relative to loaderRoot.
 // Used when fast workspace preparation is not applicable (CI fallback).
 func RelPathFromShipItURL(rawURL string, loaderRoot string) (string, bool) {
-	if localShipItDisabled {
+	if localShipItRelPathDisabled {
 		return "", false
 	}
 	rs, err := NewRepoSpecFromURL(rawURL)
@@ -175,9 +212,6 @@ func RelPathFromShipItURL(rawURL string, loaderRoot string) (string, bool) {
 
 // TryLocalShipIt binds rs.Dir to a local platform/ship-it checkout when discoverable.
 func TryLocalShipIt(rs *RepoSpec, anchorDir string) (bool, error) {
-	if localShipItDisabled {
-		return false, nil
-	}
 	if !isShipItRepoSpec(rs) {
 		return false, nil
 	}

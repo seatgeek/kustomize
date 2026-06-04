@@ -11,6 +11,7 @@ import (
 
 	"sigs.k8s.io/kustomize/api/ifc"
 	"sigs.k8s.io/kustomize/api/internal/generators"
+	"sigs.k8s.io/kustomize/api/internal/git"
 	"sigs.k8s.io/kustomize/api/internal/loader"
 	"sigs.k8s.io/kustomize/api/internal/target"
 	"sigs.k8s.io/kustomize/api/provider"
@@ -40,6 +41,13 @@ type localizer struct {
 // Run attempts to localize the kustomization root at target with the given localize arguments
 // and returns the path to the created newDir.
 func Run(target, scope, newDir string, fSys filesys.FileSystem) (string, error) {
+	loader.DisableFastWorkspace()
+	git.DisableLocalShipIt()
+	defer func() {
+		loader.EnableFastWorkspace()
+		git.EnableLocalShipIt()
+	}()
+
 	ldr, args, err := NewLoader(target, scope, newDir, fSys)
 	if err != nil {
 		return "", errors.Wrap(err)

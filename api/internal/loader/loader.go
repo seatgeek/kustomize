@@ -27,9 +27,11 @@ func NewLoader(
 			repoSpec, fSys, nil, git.ClonerUsingGitExec)
 	}
 	wsCleanup := func() error { return nil }
-	if wsTarget, cleanup, ok := tryPrepareFastWorkspace(target); ok {
-		target = wsTarget
-		wsCleanup = cleanup
+	if !fastWorkspaceDisabled {
+		if wsTarget, cleanup, ok := tryPrepareFastWorkspace(target); ok {
+			target = wsTarget
+			wsCleanup = cleanup
+		}
 	}
 	root, err := filesys.ConfirmDir(fSys, target)
 	if err != nil {

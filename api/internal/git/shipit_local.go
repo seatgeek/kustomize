@@ -26,7 +26,18 @@ var (
 	shipItRootOk       bool
 	shipItURLRegexOnce sync.Once
 	shipItURLRegex     *regexp.Regexp
+	localShipItDisabled bool
 )
+
+// DisableLocalShipIt skips binding remote ship-it bases to a local checkout (e.g. during localize).
+func DisableLocalShipIt() {
+	localShipItDisabled = true
+}
+
+// EnableLocalShipIt re-enables local ship-it binding.
+func EnableLocalShipIt() {
+	localShipItDisabled = false
+}
 
 func normalizeGitlabHostname(raw string) string {
 	host := strings.TrimSpace(raw)
@@ -139,6 +150,9 @@ func DiscoverShipItRoot(anchorDir string) (string, bool) {
 // RelPathFromShipItURL rewrites a remote ship-it git base to a path relative to loaderRoot.
 // Used when fast workspace preparation is not applicable (CI fallback).
 func RelPathFromShipItURL(rawURL string, loaderRoot string) (string, bool) {
+	if localShipItDisabled {
+		return "", false
+	}
 	rs, err := NewRepoSpecFromURL(rawURL)
 	if err != nil || !isShipItRepoSpec(rs) {
 		return "", false
@@ -161,6 +175,9 @@ func RelPathFromShipItURL(rawURL string, loaderRoot string) (string, bool) {
 
 // TryLocalShipIt binds rs.Dir to a local platform/ship-it checkout when discoverable.
 func TryLocalShipIt(rs *RepoSpec, anchorDir string) (bool, error) {
+	if localShipItDisabled {
+		return false, nil
+	}
 	if !isShipItRepoSpec(rs) {
 		return false, nil
 	}

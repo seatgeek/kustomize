@@ -191,7 +191,7 @@ func (fl *FileLoader) New(path string) (ifc.Loader, error) {
 func newLoaderAtGitClone(
 	repoSpec *git.RepoSpec, fSys filesys.FileSystem,
 	referrer *FileLoader, cloner git.Cloner) (ifc.Loader, error) {
-	cleaner := repoSpec.Cleaner(fSys)
+	cleaner := git.SafeCleaner(repoSpec, fSys)
 	anchor := ""
 	if referrer != nil {
 		anchor = referrer.Root()

@@ -11,6 +11,7 @@ import (
 
 	"sigs.k8s.io/kustomize/api/ifc"
 	"sigs.k8s.io/kustomize/api/internal/generators"
+	"sigs.k8s.io/kustomize/api/internal/git"
 	"sigs.k8s.io/kustomize/api/internal/loader"
 	"sigs.k8s.io/kustomize/api/internal/target"
 	"sigs.k8s.io/kustomize/api/provider"
@@ -40,6 +41,13 @@ type localizer struct {
 // Run attempts to localize the kustomization root at target with the given localize arguments
 // and returns the path to the created newDir.
 func Run(target, scope, newDir string, fSys filesys.FileSystem) (string, error) {
+	loader.DisableFastWorkspace()
+	git.DisableLocalShipItRelPath()
+	defer func() {
+		loader.EnableFastWorkspace()
+		git.EnableLocalShipItRelPath()
+	}()
+
 	ldr, args, err := NewLoader(target, scope, newDir, fSys)
 	if err != nil {
 		return "", errors.Wrap(err)
@@ -53,6 +61,9 @@ func Run(target, scope, newDir string, fSys filesys.FileSystem) (string, error) 
 	dst := args.NewDir.Join(toDst)
 	if err = fSys.MkdirAll(dst); err != nil {
 		return "", errors.WrapPrefixf(err, "unable to create directory in localize destination")
+	}
+	if err = seedLocalShipItKustomize(fSys, target, dst); err != nil {
+		return "", err
 	}
 
 	err = (&localizer{
@@ -70,6 +81,11 @@ func Run(target, scope, newDir string, fSys filesys.FileSystem) (string, error) 
 		return "", errors.WrapPrefixf(err, "unable to localize target %q", target)
 	}
 	return args.NewDir.String(), nil
+}
+
+func (lc *localizer) shipItSeedReady(dir string) bool {
+	return lc.fSys.Exists(filepath.Join(dir, "kustomization.yaml")) ||
+		lc.fSys.Exists(filepath.Join(dir, "kustomization.yml"))
 }
 
 // localize localizes the root that lc is at
@@ -409,11 +425,12 @@ func (lc *localizer) localizeRoot(path string) (string, error) {
 		log.Panicf("unable to establish validated root reference %q: %s", path, err)
 	}
 	var locPath string
-	if repo := ldr.Repo(); repo != "" {
+	repoDir := ldr.Repo()
+	if repoDir != "" {
 		if lc.fSys.Exists(lc.root.Join(LocalizeDir)) {
 			return "", errors.Errorf("%s already contains %s needed to store root %q", lc.root, LocalizeDir, path)
 		}
-		locPath, err = locRootPath(path, repo, root, lc.fSys)
+		locPath, err = locRootPath(path, repoDir, root, lc.fSys)
 		if err != nil {
 			return "", err
 		}
@@ -427,10 +444,28 @@ func (lc *localizer) localizeRoot(path string) (string, error) {
 	if err = lc.fSys.MkdirAll(newDst); err != nil {
 		return "", errors.WrapPrefixf(err, "unable to create root %q in localize destination", path)
 	}
+
+	workLdr := ldr
+	workRoot := root
+	if repoDir != "" && git.IsLocalShipItCheckoutRoot(filesys.ConfirmedDir(repoDir)) {
+		if lc.shipItSeedReady(newDst) {
+			innerLdr, err := loader.NewLoader(loader.RestrictionRootOnly, newDst, lc.fSys)
+			if err != nil {
+				return "", errors.WrapPrefixf(err, "unable to establish loader at seeded ship-it root %q", path)
+			}
+			defer func() { _ = innerLdr.Cleanup() }()
+			workLdr = innerLdr
+			workRoot, err = filesys.ConfirmDir(lc.fSys, newDst)
+			if err != nil {
+				return "", errors.WrapPrefixf(err, "unable to confirm seeded ship-it root %q", path)
+			}
+		}
+	}
+
 	err = (&localizer{
 		fSys:     lc.fSys,
-		ldr:      ldr,
-		root:     root,
+		ldr:      workLdr,
+		root:     workRoot,
 		rFactory: lc.rFactory,
 		dst:      newDst,
 	}).localize()

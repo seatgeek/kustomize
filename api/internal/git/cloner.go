@@ -18,6 +18,18 @@ var (
 	cloneMutex sync.Mutex
 )
 
+// IsCachedCloneDir reports whether dir is a shared cached git clone.
+func IsCachedCloneDir(dir filesys.ConfirmedDir) bool {
+	cloneMutex.Lock()
+	defer cloneMutex.Unlock()
+	for _, cached := range clones {
+		if cached == dir {
+			return true
+		}
+	}
+	return false
+}
+
 // cloneCacheKey identifies a repo checkout; kustomize subpaths share one clone per ref.
 func cloneCacheKey(repoSpec *RepoSpec) string {
 	ref := repoSpec.Ref
